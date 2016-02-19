@@ -2,9 +2,10 @@
 
 (import (rnrs) (vlad))
 
-;;;\needswork: get command-line argument
+(unless (= (length (command-line)) 2)
+ (error #f "usage: vlad <pathname>"))
 
-(vlad "test6.vlad")
+(vlad (cadr (command-line)))
 
 ;;; Local Variables:
 ;;; eval: (scheme-mode)
