@@ -1,21 +1,20 @@
 #!r6rs
 
-;;; To do
-;;;  1. limits, paths, and handlers need to be nestable
-
 (library
- (vlad)
- (export vlad vlad-I)
+ (old-vlad)
+ (export old-vlad old-vlad-I)
  (import (rnrs) (rnrs r5rs (6)) (ikarus))
 
  ;; All threading of path is for debugging.
 
  (define *debugging?* #t)
 
- ;;\needswork: The base case would nominally be triggered when count8-count=1
+ ;;\needswork: The base case would nominally be triggered when count4-count=1
  ;;            but this difference is to compensate for the fudge factors in
  ;;            the counts.
  (define *base-case-duration* 28)
+
+ (define *e* 0)
 
  (define <_e <)
 
@@ -29,7 +28,7 @@
  (define (new-tape epsilon primal factors tapes)
   (make-tape epsilon primal factors tapes 0 0))
 
- (define (tapify epsilon x) (new-tape epsilon x '() '()))
+ (define (tapify x) (new-tape *e* x '() '()))
 
  (define (lift-real->real f df/dx)
   (letrec ((self (lambda (x)
@@ -279,10 +278,8 @@
 
  (define-record-type il:continuation (fields id procedure values))
 
- (define-record-type il:handler (fields id procedure))
-
  (define-record-type il:checkpoint
-  (fields continuation expression environment epsilon count))
+  (fields continuation expression environment count))
 
 ;;; Short-circuit if is implemented with syntax that wraps with lambda and a
 ;;; ternary expression that implements applicative-order if.
@@ -360,12 +357,10 @@
 	((il:continuation? x)
 	 `(continuation ,(il:continuation-id x)
 			,(il:externalize (il:continuation-values x))))
-	((il:handler? x) `(handler ,(il:handler-id x)))
 	((il:checkpoint? x)
 	 `(checkpoint ,(il:externalize (il:checkpoint-continuation x))
 		      ,(il:externalize-expression (il:checkpoint-expression x))
 		      ,(il:externalize (il:checkpoint-environment x))
-		      ,(il:checkpoint-epsilon x)
 		      ,(il:checkpoint-count x)))
 	(else (internal-error))))
 
@@ -404,19 +399,17 @@
 	  (il:walk1 f (il:recursive-closure-environment x))))
 	((il:continuation? x)
 	 (if (= (il:continuation-id x) 9)
-	     ;;\needswork: This still breaks eq? for dummy continuation 9
-	     ;;            because if you il:walk2 then il:walk1 to extract
-	     ;;            x-prime you get back x which is equal? but not eq?
+	     ;;\needswork: This still breaks eq? for continuation9 because if
+	     ;;            you il:walk2 then il:walk1 to extract x-prime you
+	     ;;            get back x which is equal? but not eq?
 	     x
 	     (make-il:continuation (il:continuation-id x)
 				   (il:continuation-procedure x)
 				   (il:walk1 f (il:continuation-values x)))))
-	((il:handler? x) x)
 	((il:checkpoint? x)
 	 (make-il:checkpoint (il:walk1 f (il:checkpoint-continuation x))
 			     (il:checkpoint-expression x)
 			     (il:walk1 f (il:checkpoint-environment x))
-			     (il:checkpoint-epsilon x)
 			     (il:checkpoint-count x)))
 	(else (internal-error))))
 
@@ -464,9 +457,9 @@
 	 ;; generated from different calls to il:apply/il:eval.
 	 (= (il:continuation-id x) (il:continuation-id x-prime)))
     (if (= (il:continuation-id x) 9)
-	;;\needswork: This still breaks eq? for dummy continuation 9 because if
-	;;            you il:walk2 then il:walk1 to extract x-prime you get
-	;;            back x which is equal? but not eq?
+	;;\needswork: This still breaks eq? for continuation9 because if you
+	;;            il:walk2 then il:walk1 to extract x-prime you get back x
+	;;            which is equal? but not eq?
 	x
 	(make-il:continuation
 	 (il:continuation-id x)
@@ -474,19 +467,9 @@
 	 (il:continuation-procedure x)
 	 (il:walk2
 	  f (il:continuation-values x) (il:continuation-values x-prime)))))
-   ((and (il:handler? x)
-	 (il:handler? x-prime)
-	 ;; Can't check eq? on il:handler-procedure because c and c` are
-	 ;; generated from different calls to il:apply/il:eval.
-	 (= (il:handler-id x) (il:handler-id x-prime)))
-    ;; Use the one from x, not x-prime.
-    x)
    ((and (il:checkpoint? x)
 	 (il:checkpoint? x-prime)
 	 (eq? (il:checkpoint-expression x) (il:checkpoint-expression x-prime))
-	 ;;\needswork
-	 (or #t
-	     (= (il:checkpoint-epsilon x) (il:checkpoint-epsilon x-prime)))
 	 (= (il:checkpoint-count x) (il:checkpoint-count x-prime)))
     (make-il:checkpoint (il:walk2 f
 				  (il:checkpoint-continuation x)
@@ -495,8 +478,6 @@
 			(il:walk2 f
 				  (il:checkpoint-environment x)
 				  (il:checkpoint-environment x-prime))
-			;; Use the one from x, not x-prime.
-			(il:checkpoint-epsilon x)
 			(il:checkpoint-count x)))
    (else (run-time-error "Values don't conform: ~s ~s"
 			 (il:externalize x)
@@ -514,7 +495,6 @@
 	((il:recursive-closure? x)
 	 (il:walk1 f (il:recursive-closure-environment x)))
 	((il:continuation? x) (il:walk1! f (il:continuation-values x)))
-	((il:handler? x) #f)
 	((il:checkpoint? x)
 	 (il:walk1! f (il:checkpoint-continuation x))
 	 (il:walk1! f (il:checkpoint-environment x)))
@@ -563,18 +543,9 @@
 		  (= (il:continuation-id x-prime) 12)))
 	     (= (il:continuation-id x) (il:continuation-id x-prime))))
     (il:walk2! f (il:continuation-values x) (il:continuation-values x-prime)))
-   ((and (il:handler? x)
-	 (il:handler? x-prime)
-	 ;; Can't check eq? on il:continuation-procedure because c and c` are
-	 ;; generated from different calls to il:apply/il:eval.
-	 (= (il:handler-id x) (il:handler-id x-prime)))
-    #f)
    ((and (il:checkpoint? x)
 	 (il:checkpoint? x-prime)
 	 (eq? (il:checkpoint-expression x) (il:checkpoint-expression x-prime))
-	 ;;\needswork
-	 (or #t
-	     (= (il:checkpoint-epsilon x) (il:checkpoint-epsilon x-prime)))
 	 (= (il:checkpoint-count x) (il:checkpoint-count x-prime)))
     (il:walk2!
      f (il:checkpoint-continuation x) (il:checkpoint-continuation x-prime))
@@ -598,7 +569,6 @@
     (il:count-dummies c (il:recursive-closure-environment x)))
    ((il:continuation? x)
     (+ (if (eq? x c) 1 0) (il:count-dummies c (il:continuation-values x))))
-   ((il:handler? x) 0)
    ((il:checkpoint? x)
     (+ (il:count-dummies c (il:checkpoint-continuation x))
        (il:count-dummies c (il:checkpoint-environment x))))
@@ -633,12 +603,10 @@
 		 (il:continuation-id x)
 		 (il:continuation-procedure x)
 		 (il:replace-dummy c1 c2 (il:continuation-values x))))))
-   ((il:handler? x) x)
    ((il:checkpoint? x)
     (make-il:checkpoint (il:replace-dummy c1 c2 (il:checkpoint-continuation x))
 			(il:checkpoint-expression x)
 			(il:replace-dummy c1 c2 (il:checkpoint-environment x))
-			(il:checkpoint-epsilon x)
 			(il:checkpoint-count x)))
    (else (internal-error))))
 
@@ -685,17 +653,9 @@
 		 (= (il:continuation-id x-prime) 12)))
 	    (= (il:continuation-id x) (il:continuation-id x-prime)))
 	(il:equal? (il:continuation-values x) (il:continuation-values x-prime)))
-   (and (il:handler? x)
-	(il:handler? x-prime)
-	;; Can't check eq? on il:continuation-procedure because c and c` are
-	;; generated from different calls to il:apply/il:eval.
-	(= (il:handler-id x) (il:handler-id x-prime)))
    (and (il:checkpoint? x)
 	(il:checkpoint? x-prime)
 	(eq? (il:checkpoint-expression x) (il:checkpoint-expression x-prime))
-	;;\needswork
-	(or #t
-	    (= (il:checkpoint-epsilon x) (il:checkpoint-epsilon x-prime)))
 	(= (il:checkpoint-count x) (il:checkpoint-count x-prime))
 	(il:equal? (il:checkpoint-continuation x)
 		   (il:checkpoint-continuation x-prime))
@@ -708,25 +668,13 @@
  (define (il:make-continuation id procedure . values)
   (make-il:continuation id procedure values))
 
- (define (il:handle id procedure)
-  (make-il:handler id procedure))
-
- (define (il:continue continuation handler value epsilon count limit path)
+ (define (il:call-continuation continuation value count limit path)
   (apply (il:continuation-procedure continuation)
-	 handler
 	 value
-	 epsilon
 	 count
 	 limit
 	 path
-	 (il:continuation-values continuation))
-  ;;(internal-error "il:continue returned")
-  )
-
- (define (il:raise handler checkpoint)
-  ((il:handler-procedure handler) checkpoint)
-  ;;(internal-error "il:raise returned")
-  )
+	 (il:continuation-values continuation)))
 
  (define (il:destructure parameter value)
   ;; removed lambda and letrec parameters
@@ -748,10 +696,9 @@
 		  (il:binary-expression-expression2 parameter) (cdr value))))
 	(else (internal-error))))
 
- (define (il:apply continuation handler value1 value2 epsilon count limit path)
+ (define (il:apply continuation value1 value2 count limit path)
   (cond ((il:nonrecursive-closure? value1)
 	 (il:eval continuation
-		  handler
 		  (il:lambda-expression-expression
 		   (il:nonrecursive-closure-expression value1))
 		  (append (il:destructure
@@ -759,16 +706,12 @@
 			    (il:nonrecursive-closure-expression value1))
 			   value2)
 			  (il:nonrecursive-closure-environment value1))
-		  epsilon
 		  count
 		  limit
-		  path)
-	 ;;(internal-error "il:apply returned A")
-	 )
+		  path))
 	((il:recursive-closure? value1)
 	 (il:eval
 	  continuation
-	  handler
 	  (il:lambda-expression-expression
 	   (list-ref (il:recursive-closure-expressions value1)
 		     (il:recursive-closure-index value1)))
@@ -787,20 +730,14 @@
 				  (il:recursive-closure-environment value1))))
 			       (il:recursive-closure-variables value1))
 		  (il:recursive-closure-environment value1))
-	  epsilon
 	  count
 	  limit
-	  path)
-	 ;;(internal-error "il:apply returned B")
-	 )
+	  path))
 	(else (run-time-error "Not a closure: ~s" value1))))
 
- (define (il:if-procedure
-	  continuation handler value1 value2 value3 epsilon count limit path)
-  (il:continue
-   continuation handler (if value1 value2 value3) epsilon count limit path)
-  ;;(internal-error "il:if-procedure returned A")
-  )
+ (define (il:if-procedure continuation value1 value2 value3 count limit path)
+  (il:call-continuation
+   continuation (if value1 value2 value3) count limit path))
 
  (define (il:read-real value) (read))
 
@@ -808,90 +745,73 @@
 
  (define (il:write-real value) (write (primal* value)) (newline) value)
 
- (define (forward-mode continuation
-		       handler
-		       map-independent
-		       map-dependent
-		       f
-		       x
-		       x-perturbation
-		       epsilon)
+ (define (forward-mode
+	  continuation map-independent map-dependent f x x-perturbation)
+  ;;\needswork: What happens if this checkpoints in between the increment and
+  ;;            decrement of *e* and is resumed out of order? What happens if
+  ;;            the checkpoint is resumed multiple times or is not resumed?
+  (set! *e* (+ *e* 1))
   (f (il:make-continuation
       0
-      (lambda (handler y-forward epsilon count limit path continuation)
-       (let ((y
-	      (map-dependent (lambda (y-forward)
-			      (if (and (dual-number? y-forward)
-				       (not (<_e (dual-number-epsilon y-forward)
-						 epsilon)))
-				  (dual-number-primal y-forward)
-				  y-forward))
-			     y-forward))
+      (lambda (y-forward count limit path continuation)
+       (let ((y (map-dependent
+		 (lambda (y-forward)
+		  (if (and (dual-number? y-forward)
+			   (not (<_e (dual-number-epsilon y-forward) *e*)))
+		      (dual-number-primal y-forward)
+		      y-forward))
+		 y-forward))
 	     (y-perturbation
-	      (map-dependent (lambda (y-forward)
-			      (if (and (dual-number? y-forward)
-				       (not (<_e (dual-number-epsilon y-forward)
-						 epsilon)))
-				  (dual-number-perturbation y-forward)
-				  0))
-			     y-forward)))
-
-	(il:continue continuation
-		     handler
-		     (list y y-perturbation)
-		     (- epsilon 1)
-		     count
-		     limit
-		     path)
-	;;(internal-error "forward-mode returned A")
-	))
+	      (map-dependent
+	       (lambda (y-forward)
+		(if (and (dual-number? y-forward)
+			 (not (<_e (dual-number-epsilon y-forward) *e*)))
+		    (dual-number-perturbation y-forward)
+		    0))
+	       y-forward)))
+	(set! *e* (- *e* 1))
+	(il:call-continuation
+	 continuation (list y y-perturbation) count limit path)))
       continuation)
-     handler
      (map-independent (lambda (x x-perturbation)
-		       (make-dual-number (+ epsilon 1) x x-perturbation))
+		       (make-dual-number *e* x x-perturbation))
 		      x
-		      x-perturbation)
-     (+ epsilon 1))
-  ;;(internal-error "forward-mode returned B")
-  )
+		      x-perturbation)))
 
  (define (reverse-mode continuation
-		       handler
 		       map-independent
 		       map-dependent
 		       for-each-dependent1!
 		       for-each-dependent2!
 		       f
 		       x
-		       y-sensitivity
-		       epsilon)
-  (let ((x-reverse (map-independent (lambda (x) (tapify (+ epsilon 1) x)) x)))
+		       y-sensitivity)
+  ;;\needswork: What happens if this checkpoints in between the increment and
+  ;;            decrement of *e* and is resumed out of order? What happens if
+  ;;            the checkpoint is resumed multiple times or is not resumed?
+  (set! *e* (+ *e* 1))
+  (let ((x-reverse (map-independent tapify x)))
    (f (il:make-continuation
        1
-       (lambda (handler y-reverse epsilon count limit path
-			continuation x-reverse y-sensitivity)
+       (lambda (y-reverse count limit path continuation x-reverse y-sensitivity)
 	(for-each-dependent1!
 	 (lambda (y-reverse)
-	  (when (and (tape? y-reverse)
-		     (not (<_e (tape-epsilon y-reverse) epsilon)))
+	  (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) *e*)))
 	   (determine-fanout! y-reverse)))
 	 y-reverse)
 	(for-each-dependent1!
 	 (lambda (y-reverse)
-	  (when (and (tape? y-reverse)
-		     (not (<_e (tape-epsilon y-reverse) epsilon)))
+	  (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) *e*)))
 	   (initialize-sensitivity! y-reverse)))
 	 y-reverse)
 	(for-each-dependent1!
 	 (lambda (y-reverse)
-	  (when (and (tape? y-reverse)
-		     (not (<_e (tape-epsilon y-reverse) epsilon)))
+	  (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) *e*)))
 	   (determine-fanout! y-reverse)))
 	 y-reverse)
 	(for-each-dependent2!
 	 (lambda (y-reverse y-sensitivity)
-	  (when (and (tape? y-reverse)
-		     (not (<_e (tape-epsilon y-reverse) epsilon)))
+	  (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) *e*)))
 	   (reverse-phase! y-sensitivity y-reverse)))
 	 y-reverse
 	 y-sensitivity)
@@ -899,149 +819,116 @@
 	      (y (map-dependent
 		  (lambda (y-reverse)
 		   (if (and (tape? y-reverse)
-			    (not (<_e (tape-epsilon y-reverse) epsilon)))
+			    (not (<_e (tape-epsilon y-reverse) *e*)))
 		       (tape-primal y-reverse)
 		       y-reverse))
 		  y-reverse)))
-	 (il:continue continuation
-		      handler
-		      (list y x-sensitivity)
-		      (- epsilon 1)
-		      count
-		      limit
-		      path)
-	 ;;(internal-error "reverse-mode returned A")
-	 ))
+	 (set! *e* (- *e* 1))
+	 (il:call-continuation
+	  continuation (list y x-sensitivity) count limit path)))
        continuation
        x-reverse
        y-sensitivity)
-      handler
-      x-reverse
-      (+ epsilon 1)))
-  ;;(internal-error "reverse-mode returned B")
-  )
+      x-reverse)))
 
  (define (reverse-mode-for-base-case-of-checkpoint-*j continuation
-						      handler
 						      map-independent
 						      map-dependent
 						      for-each-dependent1!
 						      for-each-dependent2!
 						      f
 						      x
-						      y-sensitivity
-						      epsilon)
+						      y-sensitivity)
   ;; This is a special version of reverse-mode that handles the case where f
   ;; checkpoints.
-  (let ((x-reverse (map-independent (lambda (x) (tapify (+ epsilon 1) x)) x)))
-   (define (step0-end handler y-reverse epsilon count limit path
-		      continuation x-reverse y-sensitivity)
-    (for-each-dependent1!
-     (lambda (y-reverse)
-      (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) epsilon)))
-       (determine-fanout! y-reverse)))
-     y-reverse)
-    (for-each-dependent1!
-     (lambda (y-reverse)
-      (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) epsilon)))
-       (initialize-sensitivity! y-reverse)))
-     y-reverse)
-    (for-each-dependent1!
-     (lambda (y-reverse)
-      (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) epsilon)))
-       (determine-fanout! y-reverse)))
-     y-reverse)
-    (for-each-dependent2!
-     (lambda (y-reverse y-sensitivity)
-      (when (and (tape? y-reverse) (not (<_e (tape-epsilon y-reverse) epsilon)))
-       (reverse-phase! y-sensitivity y-reverse)))
-     y-reverse
-     y-sensitivity)
-    (let ((x-sensitivity (map-independent tape-sensitivity x-reverse))
-	  (y (map-dependent
+  ;;\needswork: What happens if this checkpoints in between the increment and
+  ;;            decrement of *e* and is resumed out of order? What happens if
+  ;;            the checkpoint is resumed multiple times or is not resumed?
+  (set! *e* (+ *e* 1))
+  (let ((x-reverse (map-independent tapify x)))
+   (let* ((continuation
+	   (il:make-continuation
+	    18
+	    (lambda (y-reverse count limit path
+			       continuation x-reverse y-sensitivity)
+	     (for-each-dependent1!
 	      (lambda (y-reverse)
-	       (if (and (tape? y-reverse)
-			(not (<_e (tape-epsilon y-reverse) epsilon)))
-		   (tape-primal y-reverse)
-		   y-reverse))
-	      y-reverse)))
-     (il:continue continuation
-		  handler
-		  (list y x-sensitivity)
-		  (- epsilon 1)
-		  count
-		  limit
-		  path)
-     ;;(internal-error
-     ;; "reverse-mode-for-base-case-of-checkpoint-*j returned A")
-     ))
-   (f (il:make-continuation 18 step0-end continuation x-reverse y-sensitivity)
-      (il:handle
-       84
-       (lambda (checkpoint)
-	;; I think count, limit, and path are never used.
-	(step0-end handler checkpoint epsilon 'count 'limit 'path
-		   continuation x-reverse y-sensitivity)))
-      x-reverse
-      (+ epsilon 1))
-   ;;(internal-error
-   ;; "reverse-mode-for-base-case-of-checkpoint-*j returned B")
-   ))
+	       (when (and (tape? y-reverse)
+			  (not (<_e (tape-epsilon y-reverse) *e*)))
+		(determine-fanout! y-reverse)))
+	      y-reverse)
+	     (for-each-dependent1!
+	      (lambda (y-reverse)
+	       (when (and (tape? y-reverse)
+			  (not (<_e (tape-epsilon y-reverse) *e*)))
+		(initialize-sensitivity! y-reverse)))
+	      y-reverse)
+	     (for-each-dependent1!
+	      (lambda (y-reverse)
+	       (when (and (tape? y-reverse)
+			  (not (<_e (tape-epsilon y-reverse) *e*)))
+		(determine-fanout! y-reverse)))
+	      y-reverse)
+	     (for-each-dependent2!
+	      (lambda (y-reverse y-sensitivity)
+	       (when (and (tape? y-reverse)
+			  (not (<_e (tape-epsilon y-reverse) *e*)))
+		(reverse-phase! y-sensitivity y-reverse)))
+	      y-reverse
+	      y-sensitivity)
+	     (let ((x-sensitivity (map-independent tape-sensitivity x-reverse))
+		   (y (map-dependent
+		       (lambda (y-reverse)
+			(if (and (tape? y-reverse)
+				 (not (<_e (tape-epsilon y-reverse) *e*)))
+			    (tape-primal y-reverse)
+			    y-reverse))
+		       y-reverse)))
+	      (set! *e* (- *e* 1))
+	      (il:call-continuation
+	       continuation (list y x-sensitivity) count limit path)))
+	    continuation
+	    x-reverse
+	    y-sensitivity))
+	  (checkpoint (f continuation x-reverse)))
+    ;; I think count, limit, and path are never used.
+    (il:call-continuation continuation checkpoint 'count 'limit 'path)
+    ;;(internal-error
+    ;; "reverse-mode-for-base-case-of-checkpoint-*j continuation checkpointed")
+    )))
 
- (define (il:j*
-	  continuation handler value1 value2 value3 epsilon count limit path)
-  (forward-mode
-   continuation
-   handler
-   il:walk2
-   il:walk1
-   (lambda (continuation handler x epsilon)
-    (il:apply continuation handler value1 x epsilon count limit path)
-    ;;(internal-error "il:j* returned A")
-    )
-   value2
-   value3
-   epsilon)
-  ;;(internal-error "il:j* returned B")
-  )
+ (define (il:j* continuation value1 value2 value3 count limit path)
+  (forward-mode continuation
+		il:walk2
+		il:walk1
+		(lambda (continuation x)
+		 (il:apply continuation value1 x count limit path))
+		value2
+		value3))
 
- (define (il:*j
-	  continuation handler value1 value2 value3 epsilon count limit path)
-  (reverse-mode
-   continuation
-   handler
-   il:walk1
-   il:walk1
-   il:walk1!
-   il:walk2!
-   (lambda (continuation handler x epsilon)
-    (il:apply continuation handler value1 x epsilon count limit path)
-    ;;(internal-error "il:*j returned A")
-    )
-   value2
-   value3
-   epsilon)
-  ;;(internal-error "il:*j returned B")
-  )
+ (define (il:*j continuation value1 value2 value3 count limit path)
+  (reverse-mode continuation
+		il:walk1
+		il:walk1
+		il:walk1!
+		il:walk2!
+		(lambda (continuation x)
+		 (il:apply continuation value1 x count limit path))
+		value2
+		value3))
 
  (define (il:base-case-of-checkpoint-*j
-	  continuation handler value1 value2 value3 epsilon count limit path)
+	  continuation value1 value2 value3 count limit path)
   (reverse-mode-for-base-case-of-checkpoint-*j
    continuation
-   handler
    il:walk1
    il:walk1
    il:walk1!
    il:walk2!
-   (lambda (continuation handler x epsilon)
-    (il:apply continuation handler value1 x epsilon count limit path)
-    ;;(internal-error "il:base-case-of-checkpoint-*j returned A")
-    )
+   (lambda (continuation x)
+    (il:apply continuation value1 x count limit path))
    value2
-   value3
-   epsilon)
-  ;;(internal-error "il:base-case-of-checkpoint-*j returned B")
-  )
+   value3))
 
  (define (il:free-variables expression)
   (cond
@@ -1073,186 +960,129 @@
      (il:letrec-expression-variables expression)))
    (else (internal-error))))
 
- (define (il:eval
-	  continuation handler expression environment epsilon count limit path)
+ (define (il:eval continuation expression environment count limit path)
   ;; Every entry into il:eval increments count exactly once. So if you call
-  ;; il:eval with count=0 and it doesn't checkpoint, it continues with
+  ;; il:eval with count=0 and it doesn't checkpoint, continuation is called with
   ;; count=n being the total number of calls to (entries into) il:eval during
   ;; the evaluation. If you evaluate the same expression in the same environment
   ;; with count=0 and limit>=n then it will not checkpoint. But if called with
   ;; count=0 and limit=(0<=i<n) then it will checkpoint upon entry to the ith
   ;; call. The entries are numbered 0,...,i.
   (when *debugging?*
-   (display "il:eval, epsilon=")
-   (write epsilon)
-   (display ", count=")
+   (display "il:eval, count=")
    (write count)
    (display ", limit=")
    (write limit)
    (display ", path=")
    (write path)
-   (display ", handler id=")
-   (write (il:handler-id handler))
    (newline)
    (pretty-print (il:externalize-expression expression)))
   (when (> count limit) (internal-error "(> count limit)" count limit))
   (let ((environment (il:restrict environment expression)))
    (cond
     ((= count limit)
-     (il:raise
-      handler
-      (make-il:checkpoint continuation expression environment epsilon count))
-     ;;(internal-error "il:eval returned A")
-     )
+     (make-il:checkpoint continuation expression environment count))
     ((il:constant-expression? expression)
-     (il:continue continuation
-		  handler
-		  (il:constant-expression-value expression)
-		  epsilon
-		  (+ count 1)
-		  limit
-		  path)
-     ;;(internal-error "il:eval returned B")
-     )
+     (il:call-continuation continuation
+			   (il:constant-expression-value expression)
+			   (+ count 1)
+			   limit
+			   path))
     ((il:variable-access-expression? expression)
-     (il:continue continuation
-		  handler
-		  (il:lookup (il:variable-access-expression-variable expression)
-			     environment)
-		  epsilon
-		  (+ count 1)
-		  limit
-		  path)
-     ;;(internal-error "il:eval returned C")
-     )
+     (il:call-continuation
+      continuation
+      (il:lookup (il:variable-access-expression-variable expression)
+		 environment)
+      (+ count 1)
+      limit
+      path))
     ((il:lambda-expression? expression)
-     (il:continue continuation
-		  handler
-		  (make-il:nonrecursive-closure expression environment)
-		  epsilon
-		  (+ count 1)
-		  limit
-		  path)
-     ;;(internal-error "il:eval returned D")
-     )
+     (il:call-continuation continuation
+			   (make-il:nonrecursive-closure expression environment)
+			   (+ count 1)
+			   limit
+			   path))
     ((il:unary-expression? expression)
      (il:eval (il:make-continuation
 	       2
-	       (lambda (handler value epsilon count limit path continuation)
+	       (lambda (value count limit path continuation)
 		((il:unary-expression-procedure expression)
-		 continuation handler value epsilon count limit path)
-		;;(internal-error "il:eval returned E")
-		)
+		 continuation value count limit path))
 	       continuation)
-	      handler
 	      (il:unary-expression-expression expression)
 	      environment
-	      epsilon
 	      (+ count 1)
 	      limit
-	      path)
-     ;;(internal-error "il:eval returned F")
-     )
+	      path))
     ((il:binary-expression? expression)
-     (il:eval
-      (il:make-continuation
-       3
-       (lambda (handler1 value1 epsilon count limit path
-			 continuation environment)
-	(il:eval
-	 (il:make-continuation
-	  4
-	  (lambda (handler2 value2 epsilon count limit path continuation value1)
-	   ((il:binary-expression-procedure expression)
-	    continuation handler2 value1 value2 epsilon count limit path)
-	   ;;(internal-error "il:eval returned G")
-	   )
-	  continuation
-	  value1)
-	 handler1
-	 (il:binary-expression-expression2 expression)
-	 environment
-	 epsilon
-	 count
-	 limit
-	 path)
-	;;(internal-error "il:eval returned H")
-	)
-       continuation
-       environment)
-      handler
-      (il:binary-expression-expression1 expression)
-      environment
-      epsilon
-      (+ count 1)
-      limit
-      path)
-     ;;(internal-error "il:eval returned I")
-     )
+     (il:eval (il:make-continuation
+	       3
+	       (lambda (value1 count limit path continuation environment)
+		(il:eval (il:make-continuation
+			  4
+			  (lambda (value2 count limit path continuation value1)
+			   ((il:binary-expression-procedure expression)
+			    continuation value1 value2 count limit path))
+			  continuation
+			  value1)
+			 (il:binary-expression-expression2 expression)
+			 environment
+			 count
+			 limit
+			 path))
+	       continuation
+	       environment)
+	      (il:binary-expression-expression1 expression)
+	      environment
+	      (+ count 1)
+	      limit
+	      path))
     ((il:ternary-expression? expression)
      (il:eval
       (il:make-continuation
        5
-       (lambda (handler1 value1 epsilon count limit path
-			 continuation environment)
-	(il:eval (il:make-continuation
-		  6
-		  (lambda (handler2 value2 epsilon count limit path
-				    continuation environment value1)
-		   (il:eval (il:make-continuation
-			     7
-			     (lambda (handler3 value3 epsilon count limit path
-					       continuation value1 value2)
-			      ((il:ternary-expression-procedure expression)
-			       continuation
-			       handler3
-			       value1
-			       value2
-			       value3
-			       epsilon
-			       count
-			       limit
-			       path)
-			      ;;(internal-error "il:eval returned J")
-			      )
-			     continuation
-			     value1
-			     value2)
-			    handler2
-			    (il:ternary-expression-expression3 expression)
-			    environment
-			    epsilon
-			    count
-			    limit
-			    path)
-		   ;;(internal-error "il:eval returned K")
-		   )
-		  continuation
-		  environment
-		  value1)
-		 handler1
-		 (il:ternary-expression-expression2 expression)
-		 environment
-		 epsilon
-		 count
-		 limit
-		 path)
-	;;(internal-error "il:eval returned L")
-	)
+       (lambda (value1 count limit path continuation environment)
+	(il:eval
+	 (il:make-continuation
+	  6
+	  (lambda (value2 count limit path continuation environment value1)
+	   (il:eval
+	    (il:make-continuation
+	     7
+	     (lambda (value3 count limit path continuation value1 value2)
+	      ((il:ternary-expression-procedure expression)
+	       continuation
+	       value1
+	       value2
+	       value3
+	       count
+	       limit
+	       path))
+	     continuation
+	     value1
+	     value2)
+	    (il:ternary-expression-expression3 expression)
+	    environment
+	    count
+	    limit
+	    path))
+	  continuation
+	  environment
+	  value1)
+	 (il:ternary-expression-expression2 expression)
+	 environment
+	 count
+	 limit
+	 path))
        continuation
        environment)
-      handler
       (il:ternary-expression-expression1 expression)
       environment
-      epsilon
       (+ count 1)
       limit
-      path)
-     ;;(internal-error "il:eval returned M")
-     )
+      path))
     ((il:letrec-expression? expression)
      (il:eval continuation
-	      handler
 	      (il:letrec-expression-expression expression)
 	      (append
 	       (map-indexed (lambda (variable index)
@@ -1265,16 +1095,17 @@
 			       environment)))
 			    (il:letrec-expression-variables expression))
 	       environment)
-	      epsilon
 	      (+ count 1)
 	      limit
-	      path)
-     ;;(internal-error "il:eval returned N")
-     )
+	      path))
     (else (internal-error)))))
 
- (define (il:checkpoint-*j
-	  continuation handler value1 value2 value3 epsilon count limit path)
+ (define (il:checkpoint-*j continuation value1 value2 value3 count limit path)
+  ;;\needswork: What happens when there is nesting? When there is no nesting,
+  ;;            the input limit is infinity. So primops doesn't checkpoint. And
+  ;;            resume doesn't checkpoint. But in a nested call, limit can be
+  ;;            finite and short enough to cause primops and resume to
+  ;;            checkpoint.
   ;; The first half of the computation is executed three times:
   ;; 1. (y,2n)=primops(f,x)
   ;; 2. c=checkpoint(f,x,n)
@@ -1283,384 +1114,12 @@
   ;; 1. (y,2n)=primops(f,x)
   ;; 3. (y,c`)=*j(\c.resume(c),c,y`)
   ;; But each half is counted only once.
-  (define (step2 handler8 value8 epsilon8 count8 limit8 path8
-		 continuation value1 value2 value3)
-   ;; handler8 and path8 are ignored.
-   (when *debugging?*
-    (display "finished step 1, path=")
-    (write (append path '(1)))
-    (newline)
-    (display "y=")
-    (pretty-print (il:externalize value8))
-    (display "steps=")
-    (write (- count8 count))
-    (display ", half=")
-    (write (quotient (- count8 count) 2))
-    (display ", count for second half=")
-    (write (+ count (quotient (- count8 count) 2)))
-    (display ", limit for second half=")
-    (write limit)
-    (newline))
-   ;; count8 must be greater than count because it is incremented before any
-   ;; path to continuing this continuation to il:apply.
-   (unless (> count8 count)
-    (internal-error "(not (> count8 count))" count8 count))
-   (cond
-    ((<= (- count8 count) *base-case-duration*)
-     (when *debugging?*
-      (display "starting base case, path=")
-      (write (append path '(0)))
-      (newline))
-     ;;\needswork: This continuation can be eta converted when we remove the
-     ;;            debugging printout.
-     (il:base-case-of-checkpoint-*j
-      (il:make-continuation
-       15
-       (lambda (handler15 value15 epsilon15 count15 limit15 path15 continuation)
-	;; path15 is ignored.
-	(when *debugging?*
-	 (display "finished base case, path=")
-	 (write (append path '(0)))
-	 (newline)
-	 (display "y=")
-	 (pretty-print (il:externalize (first value15)))
-	 (display "x`=")
-	 (pretty-print (il:externalize (second value15))))
-	(unless (il:equal? value8 (first value15))
-	 (internal-error "(not (il:equal? value8 (first value15)))"
-			 value8
-			 (first value15)))
-	(il:continue
-	 continuation handler15 value15 epsilon15 count15 limit15 path)
-	;;(internal-error "il:checkpoint-*j returned A")
-	)
-       continuation)
-      (il:handle 87 (lambda (value) (internal-error "Dummy handler 87")))
-      value1 value2 value3 epsilon8 count limit (append path '(0)))
-     ;;(internal-error "il:checkpoint-*j returned B")
-     )
-    (else
-     ;; 2. c=checkpoint(f,x,n)
-     ;; f is value1
-     ;; x is value2
-     ;; n is (quotient (- count8 count) 2)
-     ;; c is checkpoint88
-     (when *debugging?*
-      (display "inductive case, path=")
-      (write (append path '(2)))
-      (newline)
-      (display "starting step 2. c=checkpoint(f,x,n), path=")
-      (write (append path '(2)))
-      (newline))
-     (let ((continuation9
-	    ;; This continuation will be spliced out and never continued. It
-	    ;; won't be continued with the checkpoint computation but would
-	    ;; have been continued upon resume.
-	    (il:make-continuation
-	     9
-	     (lambda (handler value epsilon count limit path)
-	      (internal-error "Dummy continuation 9")))))
-      (il:apply
-       continuation9
-       (il:handle
-	88
-	;; We don't close over continuation or handler.
-	(lambda (checkpoint88)
-	 (when *debugging?*
-	  (display "finished step 2, path=")
-	  (write (append path '(2)))
-	  (newline)
-	  (display "c=")
-	  (pretty-print (il:externalize checkpoint88))
-	  (display "starting step 3. (y,c`)=*j(\\c.resume(c),c,y`), path=")
-	  (write (append path '(3)))
-	  (newline)
-	  (display "backing up count by 2")
-	  (newline))
-	 ;; 3. (y,c`)=*j(\c.resume(c),c,y`)
-	 ;; c is checkpoint88
-	 ;; y` is value3
-	 ;; y is (first value10)
-	 ;; c` is (second value10)
-	 (il:checkpoint-*j
-	  ;; This continuation will become continuation55. It would normally
-	  ;; not be continued except that it is spliced in for dummy
-	  ;; continuation 9.
-	  (il:make-continuation
-	   10
-	   ;; This closes over value8 and checkpoint88 only for consistency
-	   ;; checking.
-	   (lambda (handler10 value10 epsilon10 count10 limit10 path10
-			      continuation value1 value2 value8 checkpoint88)
-	    ;; handler10, count10, limit10, and path10, that at the end of
-	    ;; step 3, are ignored.
-	    (when *debugging?*
-	     (display "finished step 3, path=")
-	     (write (append path '(3)))
-	     (newline)
-	     (display "y=")
-	     (pretty-print (il:externalize (first value10)))
-	     (display "c`=")
-	     (pretty-print (il:externalize (second value10)))
-	     (display
-	      "starting step 4. (c,x`)=*j(\\x.checkpoint(f,x,n),x,c`), path=")
-	     (write (append path '(4)))
-	     (newline)
-	     (display "backing up count by 3")
-	     (newline))
-	    (unless (il:equal? value8 (first value10))
-	     (internal-error "(not (il:equal? value8 (first value10)))"
-			     value8
-			     (first value10)))
-	    ;; 4. (c,x`)=*j(\x.checkpoint(f,x,n),x,c`)
-	    ;; f is value1
-	    ;; x is value2
-	    ;; c` is (second value10)
-	    ;; c is (first value11)
-	    ;; x` is (second value11)
-	    (il:checkpoint-*j
-	     (il:make-continuation
-	      11
-	      ;; This closes over checkpoint88 only for consistency checking.
-	      (lambda (handler11 value11 epsilon11 count11 limit11 path11
-				 continuation checkpoint88 value10)
-	       ;; count11, limit11, and path11, that at the end of step 4, are
-	       ;; ignored, except for consistency checking.
-	       (when *debugging?*
-		(display "finished step 4, path=")
-		(write (append path '(4)))
-		(newline)
-		(display "leaving il:checkpoint-*j, path=")
-		(write path)
-		(newline)
-		(display "c=")
-		(pretty-print (il:externalize (first value11)))
-		(display "x`=")
-		(pretty-print (il:externalize (second value11)))
-		(display "count=")
-		(write count8)
-		(display ", limit=")
-		(write limit8)
-		(newline))
-	       (unless (= count11 (+ count (quotient (- count8 count) 2)))
-		(internal-error
-		 "(not (= count11 (+ count (quotient (- count8 count) 2))))"
-		 count11
-		 (+ count (quotient (- count8 count) 2))))
-	       (unless (il:equal? checkpoint88 (first value11))
-		(internal-error
-		 "(not (il:equal? checkpoint88 (first value11)))"
-		 checkpoint88
-		 (first value11)))
-	       (il:continue
-		continuation
-		handler11
-		(list (first value10) (second value11))
-		epsilon11
-		;; This fakes the count and limit to be the same as computed
-		;; for primops, as if the entire computation were done exactly
-		;; once.
-		count8
-		limit8
-		path)
-	       ;;(internal-error "il:checkpoint-*j returned C")
-	       )
-	      continuation
-	      checkpoint88
-	      value10)
-	     (il:handle 85 (lambda (value) (internal-error "Dummy handler 85")))
-	     ;; This is a closure that behaves like \x.checkpoint(f,x,n).
-	     (make-il:nonrecursive-closure
-	      (make-il:lambda-expression
-	       (make-il:variable-access-expression 'x)
-	       (make-il:binary-expression
-		(lambda (continuation66
-			 handler66
-			 value66
-			 value67
-			 epsilon66
-			 count66
-			 limit66
-			 path66)
-		 ;; continuation66 should be continuation 11, the continuation
-		 ;; created above and passed to il:checkpoint-*j for step 4.
-		 (when *debugging?*
-		  (display "starting checkpoint(f,x,n), path=")
-		  (write path66)
-		  (newline))
-		 (unless (= count66 count)
-		  (internal-error "(not (= count66 count))" count66 count))
-		 ;; Since this is a call to checkpoint(f,x,n) which always
-		 ;; raises and never continues, we continue step 4 through the
-		 ;; handler. The checkpoint should never be resumed. So dummy
-		 ;; continuation 12 should never be continued.
-		 (il:apply
-		  (il:make-continuation
-		   12
-		   (lambda (handler value epsilon count limit path)
-		    (internal-error "Dummy continuation 12")))
-		  (il:handle
-		   77
-		   ;; We don't close over continuation66 or handler66.
-		   (lambda (checkpoint77)
-		    ;; I figured this out once but don't remember the reason
-		    ;; now why when k=k9 or k=k12 you need to raise rather
-		    ;; than call the continuation and how this situation
-		    ;; can arise in the first place. But because of this
-		    ;; step 1 or step 0 nested in step 4 has to handle the
-		    ;; case of a raise instead of a continuation call.
-		    (when *debugging?*
-		     (when (= (il:continuation-id continuation66) 9)
-		      (display "k=k9, raising instead of continuing")
-		      (newline)))
-		    (when *debugging?*
-		     (when (= (il:continuation-id continuation66) 12)
-		      (display "k=k12, raising instead of continuing")
-		      (newline)))
-		    (cond
-		     ((or (= (il:continuation-id continuation66) 9)
-			  (= (il:continuation-id continuation66) 12))
-		      (il:raise handler66 checkpoint77)
-		      ;;(internal-error "il:checkpoint-*j returned D")
-		      )
-		     (else
-		      (il:continue
-		       continuation66
-		       handler66
-		       checkpoint77
-		       epsilon66
-		       ;; These are the count and limit at the end of
-		       ;; checkpoint(f,x,n). We fake this as the "count for
-		       ;; second half" or equivalently the "limit for the
-		       ;; first half". These should ultimately be passed to
-		       ;; count11 and limit11 which are ignored. We can't pass
-		       ;; dummies because the call to \x.checkpoint(f,x,n) is
-		       ;; wrapped in a call to il:checkpoint-*j which first
-		       ;; does step 1 and this computes steps at the beginning.
-		       (+ count (quotient (- count8 count) 2))
-		       (+ count (quotient (- count8 count) 2))
-		       path66)
-		      ;;(internal-error "il:checkpoint-*j returned E")
-		      ))))
-		  value66 value67 epsilon66 count66 limit66 path66)
-		 ;;(internal-error "il:checkpoint-*j returned F")
-		 )
-		(make-il:variable-access-expression 'f)
-		(make-il:variable-access-expression 'x)))
-	      (list (make-il:binding 'f value1)))
-	     value2
-	     (second value10)
-	     epsilon10
-	     ;; These are the count and limit for the first half of the
-	     ;; computation. If (zero? (quotient (- count8 count) 2)) then the
-	     ;; evaluation could checkpoint right at the start without making
-	     ;; any progress. But that can't happen. The -3 is a fudge for the
-	     ;; binary expression and the variable access expressions f and x.
-	     (- count 3)
-	     (+ count (quotient (- count8 count) 2))
-	     (append path '(4)))
-	    ;;(internal-error "il:checkpoint-*j returned G")
-	    )
-	   continuation
-	   value1
-	   value2
-	   value8
-	   checkpoint88)
-	  (il:handle 86 (lambda (value) (internal-error "Dummy handler 86")))
-	  ;; This is a closure that behaves like \c.resume(c).
-	  (make-il:nonrecursive-closure
-	   (make-il:lambda-expression
-	    (make-il:variable-access-expression 'c)
-	    (make-il:unary-expression
-	     ;;\needswork: Should this close over continuation9?
-	     (lambda (continuation55
-		      handler55
-		      value55
-		      epsilon55
-		      count55
-		      limit55
-		      path55)
-	      ;; epsilon55 is ignored.
-	      ;;\needswork: Could eliminate (il:checkpoint-count value55).
-	      (when *debugging?*
-	       (display "starting resume(c), path=")
-	       (write path55)
-	       (newline))
-	      (unless (= count55 (il:checkpoint-count value55))
-	       (internal-error
-		"(not (= count55 (il:checkpoint-count value55)))"
-		count55
-		(il:checkpoint-count value55)))
-	      (unless (= count55 (+ count (quotient (- count8 count) 2)))
-	       (internal-error
-		"(not (= count55 (+ count (quotient (- count8 count) 2))))"
-		count55
-		(+ count (quotient (- count8 count) 2))))
-	      (unless (= (il:checkpoint-count value55)
-			 (+ count (quotient (- count8 count) 2)))
-	       (internal-error
-		"(not (= (il:checkpoint-count value55) (+ count (quotient (- count8 count) 2))))"
-		(il:checkpoint-count value55)
-		(+ count (quotient (- count8 count) 2))))
-	      ;;\needswork: I don't know how there can be zero dummies.
-	      ;; It might be that there can be more than one dummy due to
-	      ;; not-safe-for-space structure sharing that is broken.
-	      (unless (<= (il:count-dummies
-			   continuation9
-			   (il:checkpoint-continuation value55))
-			  1)
-	       (internal-error "More than one dummy"
-			       (il:count-dummies
-				continuation9
-				(il:checkpoint-continuation value55))))
-	      ;; This can raise when resume(c) checkpoints which can happen
-	      ;; when step 3 is called from step 4. That is why we don't pass
-	      ;; in a dummy handler but pass in handler55.
-	      (il:eval (il:replace-dummy
-			continuation9
-			continuation55
-			(il:checkpoint-continuation value55))
-		       handler55
-		       (il:checkpoint-expression value55)
-		       (il:checkpoint-environment value55)
-		       (il:checkpoint-epsilon value55)
-		       ;; These are the count and limit for the second half of
-		       ;; the computation.
-		       (il:checkpoint-count value55)
-		       limit55
-		       path55)
-	      ;;(internal-error "il:checkpoint-*j returned H")
-	      )
-	     (make-il:variable-access-expression 'c)))
-	   '())
-	  checkpoint88
-	  value3
-	  epsilon8
-	  ;; These are the count and limit for the second half of the
-	  ;; computation. The -2 is a fudge for the unary expression and the
-	  ;; variable access expression c.
-	  (+ count (quotient (- count8 count) 2) -2)
-	  limit
-	  (append path '(3)))
-	 ;;(internal-error "il:checkpoint-*j returned I")
-	 ))
-       value1
-       value2
-       epsilon8
-       ;; These are the count and limit for the first half of the computation.
-       ;; If (zero? (quotient (- count8 count) 2)) then the evaluation could
-       ;; checkpoint right at the start without making any progress. But that
-       ;; can't happen.
-       count
-       (+ count (quotient (- count8 count) 2))
-       (append path '(2)))
-      ;;(internal-error "il:checkpoint-*j returned J")
-      ))))
+  ;;
   ;; 1. (y,2n)=primops(f,x)
   ;; f is value1
   ;; x is value2
-  ;; y is value8
-  ;; n is (quotient (- count8 count) 2)
+  ;; y is value4
+  ;; n is (quotient (- count4 count) 2)
   (when *debugging?*
    (display "entering il:checkpoint-*j, path=")
    (write path)
@@ -1679,34 +1138,367 @@
    (display "starting step 1. (y,2n)=primops(f,x), path=")
    (write (append path '(1)))
    (newline))
-  (il:apply
-   (il:make-continuation
-    8
-    step2
-    continuation
-    value1
-    value2
-    value3)
-   (il:handle
-    99
-    ;; We don't close over continuation, handler, value1, value2, or value3.
-    (lambda (checkpoint99)
-     ;; When step 1 is called from step 3 which is called from step 4, the
-     ;; call to primops checkpoints and doesn't continue. So we have to
-     ;; continue through the handler.
-     (step2 handler checkpoint99 epsilon limit limit path
-	    continuation value1 value2 value3)
-     ;;(internal-error "il:checkpoint-*j returned K")
-     ))
-   value1
-   value2
-   epsilon
-   ;; These are the count and limit for the whole computation.
-   count
-   limit
-   (append path '(1)))
-  ;;(internal-error "il:checkpoint-*j returned L")
-  )
+  (let* ((continuation4
+	  (il:make-continuation
+	   8
+	   (lambda (value4 count4 limit4 path4
+			   continuation value1 value2 value3)
+	    ;; path4 is ignored
+	    (when *debugging?*
+	     (display "finished step 1, path=")
+	     (write (append path '(1)))
+	     (newline)
+	     (display "y=")
+	     (pretty-print (il:externalize value4))
+	     (display "steps=")
+	     (write (- count4 count))
+	     (display ", half=")
+	     (write (quotient (- count4 count) 2))
+	     (display ", count for second half=")
+	     (write (+ count (quotient (- count4 count) 2)))
+	     (display ", limit for second half=")
+	     (write limit)
+	     (newline))
+	    ;; count4 must be greater than count because it is incremented
+	    ;; before any path to calling this continuation to il:apply.
+	    (unless (> count4 count)
+	     (internal-error "(not (> count4 count))" count4 count))
+	    (cond
+	     ((<= (- count4 count) *base-case-duration*)
+	      (when *debugging?*
+	       (display "starting base case, path=")
+	       (write (append path '(0)))
+	       (newline))
+	      ;;\needswork: This continuation can be eta converted when we
+	      ;;            remove the debugging printout.
+	      (il:base-case-of-checkpoint-*j
+	       (il:make-continuation
+		15
+		(lambda (value count limit path15 continuation)
+		 ;; path15 is ignored
+		 (when *debugging?*
+		  (display "finished base case, path=")
+		  (write (append path '(0)))
+		  (newline)
+		  (display "y=")
+		  (pretty-print (il:externalize (first value)))
+		  (display "x`=")
+		  (pretty-print (il:externalize (second value))))
+		 (il:call-continuation continuation value count limit path)
+		 ;;(internal-error "base case continuation checkpointed")
+		 )
+		continuation)
+	       value1 value2 value3 count limit (append path '(0)))
+	      ;;(internal-error "base case checkpointed")
+	      )
+	     (else
+	      ;; 2. c=checkpoint(f,x,n)
+	      ;; f is value1
+	      ;; x is value2
+	      ;; n is (quotient (- count4 count) 2)
+	      ;; c is checkpoint5
+	      (when *debugging?*
+	       (display "inductive case, path=")
+	       (write (append path '(2)))
+	       (newline)
+	       (display "starting step 2. c=checkpoint(f,x,n), path=")
+	       (write (append path '(2)))
+	       (newline))
+	      (let* ((continuation9
+		      ;; This continuation will be spliced out and never called.
+		      ;; It won't be called with the checkpoint computation but
+		      ;; would have been called upon resume.
+		      (il:make-continuation
+		       9
+		       (lambda (value count limit path)
+			(internal-error "Dummy continuation 9"))))
+		     (checkpoint5
+		      (il:apply
+		       continuation9
+		       value1
+		       value2
+		       ;; These are the count and limit for the first half of
+		       ;; the computation. If
+		       ;; (zero? (quotient (- count4 count) 2))
+		       ;; then the evaluation could checkpoint right at the
+		       ;; start without making any progress. But that can't
+		       ;; happen.
+		       count
+		       (+ count (quotient (- count4 count) 2))
+		       (append path '(2)))))
+	       (when *debugging?*
+		(display "finished step 2, path=")
+		(write (append path '(2)))
+		(newline)
+		(display "c=")
+		(pretty-print (il:externalize checkpoint5))
+		(display
+		 "starting step 3. (y,c`)=*j(\\c.resume(c),c,y`), path=")
+		(write (append path '(3)))
+		(newline)
+		(display "backing up count by 2")
+		(newline))
+	       ;; 3. (y,c`)=*j(\c.resume(c),c,y`)
+	       ;; c is checkpoint5
+	       ;; y` is value3
+	       ;; y is (first value6)
+	       ;; c` is (second value6)
+	       (il:checkpoint-*j
+		;; This continuation will become continuation10. It would
+		;; normally not be called except that it is spliced in for the
+		;; dummy continuation 9.
+		(il:make-continuation
+		 10
+		 ;; This closes over value4 and checkpoint5 only for consistency
+		 ;; checking.
+		 (lambda (value6 count6 limit6 path6
+				 continuation value1 value2 value4 checkpoint5)
+		  ;; envirornment6, count6, limit6, and path6m that at the end
+		  ;; of step 3, are ignored.
+		  (when *debugging?*
+		   (display "finished step 3, path=")
+		   (write (append path '(3)))
+		   (newline)
+		   (display "y=")
+		   (pretty-print (il:externalize (first value6)))
+		   (display "c`=")
+		   (pretty-print (il:externalize (second value6)))
+		   (display
+		    "starting step 4. (c,x`)=*j(\\x.checkpoint(f,x,n),x,c`), path=")
+		   (write (append path '(4)))
+		   (newline)
+		   (display "backing up count by 3")
+		   (newline))
+		  ;; 4. (c,x`)=*j(\x.checkpoint(f,x,n),x,c`)
+		  ;; f is value1
+		  ;; x is value2
+		  ;; c` is (second value6)
+		  ;; c is (first value7)
+		  ;; x` is (second value7)
+		  (unless (il:equal? value4 (first value6))
+		   (internal-error "(not (il:equal? value4 (first value6)))"
+				   value4
+				   (first value6)))
+		  (il:checkpoint-*j
+		   (il:make-continuation
+		    11
+		    ;; This closes over checkpoint5 only for consistency
+		    ;; checking.
+		    (lambda (value7 count7 limit7 path7
+				    continuation checkpoint5 value6)
+		     ;; count7, limit7, and path7, that at the end of step 4,
+		     ;; are ignored, except for consistency checking.
+		     (when *debugging?*
+		      (display "finished step 4, path=")
+		      (write (append path '(4)))
+		      (newline))
+		     (unless (= count7 (+ count (quotient (- count4 count) 2)))
+		      (internal-error
+		       "(not (= count7 (+ count (quotient (- count4 count) 2))))"
+		       count7
+		       (+ count (quotient (- count4 count) 2))))
+		     (unless (il:equal? checkpoint5 (first value7))
+		      (internal-error
+		       "(not (il:equal? checkpoint5 (first value7)))"
+		       checkpoint5
+		       (first value7)))
+		     (when *debugging?*
+		      (display "leaving il:checkpoint-*j, path=")
+		      (write path)
+		      (newline)
+		      (display "c=")
+		      (pretty-print (il:externalize (first value7)))
+		      (display "x`=")
+		      (pretty-print (il:externalize (second value7)))
+		      (display "count=")
+		      (write count4)
+		      (display ", limit=")
+		      (write limit4)
+		      (newline))
+		     (il:call-continuation
+		      continuation
+		      (list (first value6) (second value7))
+		      ;; This fakes the count and limit to be the same as
+		      ;; computed for primops, as if the entire computation
+		      ;; were done exactly once.
+		      count4
+		      limit4
+		      path)
+		     ;;(internal-error "step 4 continuation checkpointed")
+		     )
+		    continuation
+		    checkpoint5
+		    value6)
+		   ;; This is a closure that behaves like \x.checkpoint(f,x,n).
+		   (make-il:nonrecursive-closure
+		    (make-il:lambda-expression
+		     (make-il:variable-access-expression 'x)
+		     (make-il:binary-expression
+		      (lambda (continuation8 value8 value9 count8 limit8 path8)
+		       ;; path8 is ignored
+		       ;; continuation8 should be continuation 11, the value of
+		       ;; the above il:make-continuation passed to
+		       ;; il:checkpoint-*j for step 4.
+		       (when *debugging?*
+			(display "starting checkpoint(f,x,n), path=")
+			(write path8)
+			(newline))
+		       (unless (= count8 count)
+			(internal-error "(not (= count8 count))" count8 count))
+		       ;; Because the call to checkpoint(f,x,n) returns and
+		       ;; never calls its continuation, we have to call the
+		       ;; continuation of step 4.
+		       (let ((checkpoint27
+			      ;; Since this is a call to checkpoint(f,x,n), it
+			      ;; will always checkpoint. That means that it
+			      ;; returns a checkpoint and never calls its
+			      ;; continuation. The returned checkpoint should
+			      ;; never be resumed. So the dummy continuation 12
+			      ;; should never be called.
+			      (il:apply
+			       (il:make-continuation
+				12
+				(lambda (value count limit path)
+				 (internal-error "Dummy continuation 12")))
+			       value8 value9 count8 limit8 path8)))
+			;; I figured this out once but don't remember the reason
+			;; now why when k=k9 or k=k12 you need to return rather
+			;; than call the continuation and how this situation
+			;; can arise in the first place. But because of this
+			;; step 1 or step 0 nested in step 4 has to handle the
+			;; case of a return instead of a continuation call.
+			(when *debugging?*
+			 (when (= (il:continuation-id continuation8) 9)
+			  (display
+			   "k=k9, returning instead of calling continuation")
+			  (newline)))
+			(when *debugging?*
+			 (when (= (il:continuation-id continuation8) 12)
+			  (display
+			   "k=k12, returning instead of calling continuation")
+			  (newline)))
+			(if (or (= (il:continuation-id continuation8) 9)
+				(= (il:continuation-id continuation8) 12))
+			    checkpoint27
+			    ;;\needswork: We don't give an error if this
+			    ;;            checkpoints.
+			    (il:call-continuation
+			     continuation8
+			     checkpoint27
+			     ;; These are the count and limit at the end of
+			     ;; checkpoint(f,x,n). Since this checkpoints,
+			     ;; count9=limit9.
+			     ;; We fake this as the "count for second half" or
+			     ;; equivalently the "limit for the first half".
+			     ;; These should ultimately be passed to count7 and
+			     ;; limit7 which are ignored. We can't pass dummies
+			     ;; because the call to \x.checkpoint(f,x,n) is
+			     ;; wrapped in a call to il:checkpoint-*j which
+			     ;; first does step 1 and this computes steps at
+			     ;; the beginning.
+			     (+ count (quotient (- count4 count) 2))
+			     (+ count (quotient (- count4 count) 2))
+			     path8))))
+		      (make-il:variable-access-expression 'f)
+		      (make-il:variable-access-expression 'x)))
+		    (list (make-il:binding 'f value1)))
+		   value2
+		   (second value6)
+		   ;; These are the count and limit for the first half of the
+		   ;; computation. If (zero? (quotient (- count4 count) 2))
+		   ;; then the evaluation could checkpoint right at the start
+		   ;; without making any progress. But that can't happen.
+		   ;; The -3 is a fudge for the binary expression and the
+		   ;; variable access expressions f and x.
+		   (- count 3)
+		   (+ count (quotient (- count4 count) 2))
+		   (append path '(4)))
+		  ;;(internal-error "step 4 checkpointed")
+		  )
+		 continuation
+		 value1
+		 value2
+		 value4
+		 checkpoint5)
+		;; This is a closure that behaves like \c.resume(c).
+		(make-il:nonrecursive-closure
+		 (make-il:lambda-expression
+		  (make-il:variable-access-expression 'c)
+		  (make-il:unary-expression
+		   ;;\needswork: Should this close over continuation9?
+		   (lambda (continuation10 value10 count10 limit10 path10)
+		    ;; path10 is ignored
+		    ;;\needswork: Could eliminate (il:checkpoint-count value10).
+		    (when *debugging?*
+		     (display "starting resume(c), path=")
+		     (write path10)
+		     (newline))
+		    (unless (= count10 (il:checkpoint-count value10))
+		     (internal-error
+		      "(not (= count10 (il:checkpoint-count value10)))"
+		      count10
+		      (il:checkpoint-count value10)))
+		    (unless (= count10 (+ count (quotient (- count4 count) 2)))
+		     (internal-error
+		      "(not (= count10 (+ count (quotient (- count4 count) 2))))"
+		      count10
+		      (+ count (quotient (- count4 count) 2))))
+		    (unless (= (il:checkpoint-count value10)
+			       (+ count (quotient (- count4 count) 2)))
+		     (internal-error
+		      "(not (= (il:checkpoint-count value10) (+ count (quotient (- count4 count) 2))))"
+		      (il:checkpoint-count value10)
+		      (+ count (quotient (- count4 count) 2))))
+		    ;;\needswork: I don't know how there can be zero dummies.
+		    ;; It might be that there can be more than one dummy due
+		    ;; to not-safe-for-space structure sharing that is broken.
+		    (unless (<= (il:count-dummies
+				 continuation9
+				 (il:checkpoint-continuation value10))
+				1)
+		     (internal-error "More than one dummy"
+				     (il:count-dummies
+				      continuation9
+				      (il:checkpoint-continuation value10))))
+		    ;; This can return when resume(c) checkpoints which can
+		    ;; happen when step 3 is called from step 4.
+		    (il:eval (il:replace-dummy
+			      continuation9
+			      continuation10
+			      (il:checkpoint-continuation value10))
+			     (il:checkpoint-expression value10)
+			     (il:checkpoint-environment value10)
+			     ;; These are the count and limit for the second
+			     ;; half of the computation.
+			     (il:checkpoint-count value10)
+			     limit10
+			     path10))
+		   (make-il:variable-access-expression 'c)))
+		 '())
+		checkpoint5
+		value3
+		;; These are the count and limit for the second half of the
+		;; computation. The -2 is a fudge for the unary expression and
+		;; the variable access expression c.
+		(+ count (quotient (- count4 count) 2) -2)
+		limit
+		(append path '(3)))
+	       ;;(internal-error "step 3 checkpointed")
+	       ))))
+	   continuation
+	   value1
+	   value2
+	   value3))
+	 (checkpoint4
+	  ;; These are the count and limit for the whole computation.
+	  (il:apply
+	   continuation4 value1 value2 count limit (append path '(1)))))
+   ;; When step 1 is called from step 3 which is called from step 4, the
+   ;; call to primops checkpoints and doesn't call its continuation. So we have
+   ;; to call it here.
+   (il:call-continuation continuation4 checkpoint4 limit limit path)
+   ;;(internal-error "step 1 continuation checkpointed")
+   ))
 
  (define first car)
 
@@ -2085,11 +1877,8 @@
 	     (else (loop (macro-expand e) xs))))))
     (else (compile-time-error "Invalid expression: ~s" e)))))
 
- (define (il:cons continuation handler value1 value2 epsilon count limit path)
-  (il:continue
-   continuation handler (cons value1 value2) epsilon count limit path)
-  ;;(internal-error "il:cons returned")
-  )
+ (define (il:cons continuation value1 value2 count limit path)
+  (il:call-continuation continuation (cons value1 value2) count limit path))
 
  (define (new-cons-expression e1 e2) (make-il:binary-expression il:cons e1 e2))
 
@@ -2149,10 +1938,8 @@
     (make-il:lambda-expression
      (make-il:variable-access-expression 'x)
      (make-il:unary-expression
-      (lambda (continuation handler value epsilon count limit path)
-       (il:continue continuation handler (f value) epsilon count limit path)
-       ;;(internal-error "unary primitive returned")
-       )
+      (lambda (continuation value count limit path)
+       (il:call-continuation continuation (f value) count limit path))
       (make-il:variable-access-expression 'x)))
     '())))
 
@@ -2165,11 +1952,8 @@
      (new-cons-expression (make-il:variable-access-expression 'x1)
 			  (make-il:variable-access-expression 'x2))
      (make-il:binary-expression
-      (lambda (continuation handler value1 value2 epsilon count limit path)
-       (il:continue
-	continuation handler (f value1 value2) epsilon count limit path)
-       ;;(internal-error "binary primitive returned")
-       )
+      (lambda (continuation value1 value2 count limit path)
+       (il:call-continuation continuation (f value1 value2) count limit path))
       (make-il:variable-access-expression 'x1)
       (make-il:variable-access-expression 'x2)))
     '())))
@@ -2230,7 +2014,7 @@
 	(make-ternary-primitive '*j il:*j)
 	(make-ternary-primitive 'checkpoint-*j il:checkpoint-*j)))
 
- (define (vlad pathname)
+ (define (old-vlad pathname)
   (let loop ((es (read-source pathname)) (ds '()))
    (unless (null? es)
     (if (definition? (first es))
@@ -2242,24 +2026,21 @@
 		(bs (second result)))
 	  (il:eval (il:make-continuation
 		    13
-		    (lambda (handler value epsilon count limit path)
-		     ;; handler, epsilon, count, limit, and path are ignored.
+		    (lambda (value count limit path)
+		     ;; count, limit, and path are ignored
 		     (write value)
 		     (newline)
 		     (loop (rest es) ds)))
-		   (il:handle
-		    89 (lambda (value) (internal-error "Dummy handler 89")))
 		   e
 		   bs
 		   0
-		   0
 		   (/ 1.0 0.0)
 		   '())
-	  ;;(internal-error "REPL returned")
+	  ;;(internal-error "REPL checkpointed")
 	  ))))
    (exit)))
 
- (define (vlad-I include-directory pathname)
+ (define (old-vlad-I include-directory pathname)
   (set! *include-path* (list include-directory))
   (let loop ((es (read-source pathname)) (ds '()))
    (unless (null? es)
@@ -2272,19 +2053,16 @@
 		(bs (second result)))
 	  (il:eval (il:make-continuation
 		    14
-		    (lambda (handler value epsilon count limit path)
-		     ;; handler, epsilon, count, limit, and path are ignored.
+		    (lambda (value count limit path)
+		     ;; count, limit, and path are ignored
 		     (write value)
 		     (newline)
 		     (loop (rest es) ds)))
-		   (il:handle
-		    78 (lambda (value) (internal-error "Dummy handler 78")))
 		   e
 		   bs
 		   0
-		   0
 		   (/ 1.0 0.0)
 		   '())
-	  ;;(internal-error "REPL returned")
+	  ;;(internal-error "REPL checkpointed")
 	  ))))
    (exit))))
